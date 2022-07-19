@@ -1,0 +1,11 @@
+data/
+
+#ipynb file
+*.ipynb
+
+#txt files
+*.txt
+
+# idea
+
+.idea/
