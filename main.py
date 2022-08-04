@@ -15,7 +15,6 @@ import utils, dataloader
 from torch.optim import SGD, Adam
 
 from module.transformer import Transformer
-torch.autograd.set_detect_anomaly(True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
 
@@ -23,8 +22,9 @@ def train(tr_dataloader, ts_dataloader, epochs, model, criterion, args):
     optimizer = Adam(params=model.parameters(),
                      lr=args.lr,
                      weight_decay=args.weight_decay)
+
     model.train()
-    model.zero_grad()
+    tr_accuracy, ts_accuracy = [], []
 
     for epoch in range(epochs):
         tr_loss = 0
@@ -32,21 +32,20 @@ def train(tr_dataloader, ts_dataloader, epochs, model, criterion, args):
         correct = 0
 
         for idx, (data, target) in enumerate(tr_dataloader):
-            data = data.permute(0, 2, 1)
-            data = data[:,:14,:]
-            cls_token = torch.zeros(data.shape[0], data.shape[1], 1)
-            data = torch.cat([cls_token, data], axis=2)
-            target[target < 5] = 0
-            target[target >= 5] = 1
+            # data = data.permute(0, 2, 1)
+            data = data[:,:,:14]
 
             data, target = data.to(device), target.to(device)
+
+            target[target < 5] = 0
+            target[target >= 5] = 1
 
             outputs = model(data).squeeze()
             loss = criterion(outputs, target)
             tr_loss += loss.item()
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
             optimizer.step()
 
             model.zero_grad()
@@ -58,7 +57,9 @@ def train(tr_dataloader, ts_dataloader, epochs, model, criterion, args):
             cnt += target.shape[0]
 
             print("\r[epoch {:3d}/{:3d}] [batch {:4d}/{:4d}] loss: {:.6f} acc: {:.4f}".format(
-                epoch, args.n_epochs, idx + 1, len(tr_dataloader), loss, correct / cnt), end=' ')
+                epoch, args.n_epochs, idx + 1, len(tr_dataloader), tr_loss / (idx+1), correct / cnt), end=' ')
+
+        tr_accuracy.append(correct / cnt)
 
         model.eval()
 
@@ -68,16 +69,19 @@ def train(tr_dataloader, ts_dataloader, epochs, model, criterion, args):
 
         with torch.no_grad():
             for idx, (data, target) in enumerate(ts_dataloader):
-                data = data.permute(0, 2, 1)
-                data = data[:, :14, :]
-                cls_token = torch.zeros(data.shape[0], data.shape[1], 1)
-                data = torch.cat([cls_token, data], axis=2)
-                target[target < 5] = 0
-                target[target >= 5] = 1
+                # data = data.permute(0, 2, 1)
+                data = data[:,:,:14]
 
                 data, target = data.to(device), target.to(device)
 
+                target[target < 5] = 0
+                target[target >= 5] = 1
+
                 outputs = model(data).squeeze()
+                loss = criterion(outputs, target)
+
+                ts_loss += loss.item()
+
                 outputs[outputs >= 0.5] = 1
                 outputs[outputs < 0.5] = 0
 
@@ -85,13 +89,15 @@ def train(tr_dataloader, ts_dataloader, epochs, model, criterion, args):
                 ts_cnt += target.shape[0]
 
                 print("\r[epoch {:3d}/{:3d}] [batch {:4d}/{:4d}] loss: {:.6f} acc: {:.4f}".format(
-                    epoch, args.n_epochs, idx + 1, len(ts_dataloader), ts_loss, ts_correct / ts_cnt), end=' ')
+                    epoch, args.n_epochs, idx + 1, len(ts_dataloader), ts_loss / (idx+1), ts_correct / ts_cnt), end=' ')
 
+        print(ts_correct / ts_cnt)
+        ts_accuracy.append(ts_correct / ts_cnt)
 
     tr_loss /= cnt
     tr_acc = correct / cnt
 
-    return tr_loss, tr_acc
+    return tr_loss, tr_acc, tr_accuracy, ts_accuracy
 
 def main():
     parser = argparse.ArgumentParser(description='NMT - Transformer')
@@ -135,10 +141,12 @@ def main():
                         dropout=args.dropout)
 
     model = model.to(device)
-    criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss()
 
-    tr_loss, tr_acc = train(tr_dataloader, ts_dataloader, args.n_epochs, model, criterion, args)
+    tr_loss, tr_acc, tr_accuracy, ts_accuracy = train(tr_dataloader, ts_dataloader, args.n_epochs, model, criterion, args)
     print("tr: ({:.4f}, {:5.2f} | ".format(tr_loss, tr_acc * 100), end='')
+
+    print(tr_accuracy, ts_accuracy)
 
     torch.save(model.state_dict(), "./model/model.pt")
 

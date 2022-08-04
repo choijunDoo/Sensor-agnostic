@@ -6,7 +6,7 @@ from torch import nn, Tensor
 device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, dim_model, max_seq_len=513, dropout=0.1):
+    def __init__(self, dim_model, max_seq_len=130, dropout=0.1):
         super(PositionalEncoding, self).__init__()
 
         self.dropout = nn.Dropout(p=dropout)
@@ -22,8 +22,9 @@ class PositionalEncoding(nn.Module):
         self.encoding[:,1::2] = torch.cos(pos / (10000 ** (_2i / dim_model)))
 
     def forward(self, x):
-        batch_size, _, seq_len = x.size() ## (2, 512, 513)
-        enc = self.encoding[:seq_len, :] ## (513, 512)
-        x = x.view([-1, x.shape[2], x.shape[1]]) + enc ## (2,513,512) + (513,512)
+        batch_size, _, seq_len = x.size() ## (bs, 512, 130(sequence + class token))
+        enc = self.encoding[:seq_len, :] ## (130, 512)
+        x = x.permute(0,2,1)
+        x = x + enc ## (bs,130,512) + (130,512)
 
         return self.dropout(x)
